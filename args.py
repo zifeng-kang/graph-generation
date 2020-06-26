@@ -44,6 +44,10 @@ class Args():
         self.max_num_node = None # max number of nodes in a graph
         self.max_prev_node = None # max previous node that looks back
 
+        self.max_node_feature_num = 1 # max node feature number of desired output
+        self.max_edge_feature_num = 1 # max edge feature number of desired output
+        self.edge_feature_output_dim = None
+
         ### network config
         ## GraphRNN
         if 'small' in self.graph_type:

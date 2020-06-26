@@ -27,6 +27,7 @@ from data import *
 from args import Args
 import create_graphs
 
+args = Args()
 
 def train_vae_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
@@ -431,20 +432,30 @@ def train_mlp_forward_epoch(epoch, args, rnn, output, data_loader):
 
 def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     optimizer_rnn, optimizer_output,
-                    scheduler_rnn, scheduler_output):
+                    scheduler_rnn, scheduler_output,
+                    node_f_gen=None, edge_f_gen=None):
+    flag_gen = False
+    if node_f_gen and edge_f_gen:
+        flag_gen = True
     rnn.train()
     output.train()
+    if flag_gen:
+        node_f_gen.train()
+        edge_f_gen.train()
     loss_sum = 0
     for batch_idx, data in enumerate(data_loader):
         rnn.zero_grad()
         output.zero_grad()
+        if flag_gen:
+            node_f_gen.zero_grad()
+            edge_f_gen.zero_grad()
         x_unsorted = data['x'].float()
         y_unsorted = data['y'].float()
         y_len_unsorted = data['len']
         y_len_max = max(y_len_unsorted)
         x_unsorted = x_unsorted[:, 0:y_len_max, :]
         y_unsorted = y_unsorted[:, 0:y_len_max, :]
-        # initialize lstm hidden state according to batch size
+        # initialize GRU hidden state according to batch size
         rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
         # output.hidden = output.init_hidden(batch_size=x_unsorted.size(0)*x_unsorted.size(1))
 
@@ -471,20 +482,28 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         for i in range(len(output_y_len_bin)-1,0,-1):
             count_temp = np.sum(output_y_len_bin[i:]) # count how many y_len is above i
             output_y_len.extend([min(i,y.size(2))]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
+
         # pack into variable
         x = Variable(x).cuda()
         y = Variable(y).cuda()
         output_x = Variable(output_x).cuda()
         output_y = Variable(output_y).cuda()
-        # print(output_y_len)
-        # print('len',len(output_y_len))
-        # print('y',y.size())
-        # print('output_y',output_y.size())
+        print(output_y_len)
+        print('len',len(output_y_len))
+        print('y',y.size())
+        print('output_y',output_y.size())
+
+        output_node_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.max_node_feature_num)).cuda()
+        output_edge_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.edge_feature_output_dim)).cuda()
 
 
         # if using ground truth to train
         h = rnn(x, pack=True, input_len=y_len)
+        node_f_pred = node_f_gen(h)  # TODO: check if dim correct
+        node_f_pred = torch.sigmoid(node_f_pred)
+
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
+
         # reverse h
         idx = [i for i in range(h.size(0) - 1, -1, -1)]
         idx = Variable(torch.LongTensor(idx)).cuda()
@@ -492,14 +511,18 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         hidden_null = Variable(torch.zeros(args.num_layers-1, h.size(0), h.size(1))).cuda()
         output.hidden = torch.cat((h.view(1,h.size(0),h.size(1)),hidden_null),dim=0) # num_layers, batch_size, hidden_size
         y_pred = output(output_x, pack=True, input_len=output_y_len)
-        y_pred = F.sigmoid(y_pred)
+        edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
+        edge_f_pred = torch.sigmoid(edge_f_pred)
+        y_pred = torch.sigmoid(y_pred)
         # clean
         y_pred = pack_padded_sequence(y_pred, output_y_len, batch_first=True)
         y_pred = pad_packed_sequence(y_pred, batch_first=True)[0]
         output_y = pack_padded_sequence(output_y,output_y_len,batch_first=True)
         output_y = pad_packed_sequence(output_y,batch_first=True)[0]
         # use cross entropy loss
-        loss = binary_cross_entropy_weight(y_pred, output_y)
+        loss = binary_cross_entropy_weight(y_pred, output_y) + \
+               binary_cross_entropy_weight(node_f_pred, output_node_f) + \
+               binary_cross_entropy_weight(edge_f_pred, output_edge_f)
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -642,7 +665,7 @@ def train_rnn_forward_epoch(epoch, args, rnn, output, data_loader):
 
 
 ########### train function for LSTM + VAE
-def train(args, dataset_train, rnn, output):
+def train(args, dataset_train, rnn, output, node_f_gen=None, edge_f_gen=None):
     # check if load existing model
     if args.load:
         fname = args.model_save_path + args.fname + 'lstm_' + str(args.load_epoch) + '.dat'
@@ -679,7 +702,8 @@ def train(args, dataset_train, rnn, output):
         elif 'GraphRNN_RNN' in args.note:
             train_rnn_epoch(epoch, args, rnn, output, dataset_train,
                             optimizer_rnn, optimizer_output,
-                            scheduler_rnn, scheduler_output)
+                            scheduler_rnn, scheduler_output,
+                            node_f_gen, edge_f_gen)
         time_end = tm.time()
         time_all[epoch - 1] = time_end - time_start
         # test
