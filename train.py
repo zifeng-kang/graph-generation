@@ -488,13 +488,13 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         y = Variable(y).cuda()
         output_x = Variable(output_x).cuda()
         output_y = Variable(output_y).cuda()
-        print(output_y_len)
-        print('len',len(output_y_len))
-        print('y',y.size())
-        print('output_y',output_y.size())
+        # print(output_y_len)
+        # print('len',len(output_y_len))
+        # print('y',y.size())
+        # print('output_y',output_y.size())
 
-        output_node_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.max_node_feature_num)).cuda()
-        output_edge_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.edge_feature_output_dim)).cuda()
+        output_node_f = Variable(torch.zeros(x.size(0), x.size(1), args.max_node_feature_num)).cuda()
+        # output_edge_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.edge_feature_output_dim)).cuda()
 
 
         # if using ground truth to train
@@ -511,8 +511,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         hidden_null = Variable(torch.zeros(args.num_layers-1, h.size(0), h.size(1))).cuda()
         output.hidden = torch.cat((h.view(1,h.size(0),h.size(1)),hidden_null),dim=0) # num_layers, batch_size, hidden_size
         y_pred = output(output_x, pack=True, input_len=output_y_len)
-        edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
-        edge_f_pred = torch.sigmoid(edge_f_pred)
+        # edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
+        # edge_f_pred = torch.sigmoid(edge_f_pred)
         y_pred = torch.sigmoid(y_pred)
         # clean
         y_pred = pack_padded_sequence(y_pred, output_y_len, batch_first=True)
@@ -520,9 +520,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         output_y = pack_padded_sequence(output_y,output_y_len,batch_first=True)
         output_y = pad_packed_sequence(output_y,batch_first=True)[0]
         # use cross entropy loss
+        loss = 0
         loss = binary_cross_entropy_weight(y_pred, output_y) + \
-               binary_cross_entropy_weight(node_f_pred, output_node_f) + \
-               binary_cross_entropy_weight(edge_f_pred, output_edge_f)
+               binary_cross_entropy_weight(node_f_pred, output_node_f) #+ \
+               # binary_cross_entropy_weight(edge_f_pred, output_edge_f)
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -536,9 +537,9 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                 epoch, args.epochs,loss.data[0], args.graph_type, args.num_layers, args.hidden_size_rnn))
 
         # logging
-        log_value('loss_'+args.fname, loss.data[0], epoch*args.batch_ratio+batch_idx)
+        log_value('loss_'+args.fname, loss.data, epoch*args.batch_ratio+batch_idx)
         feature_dim = y.size(1)*y.size(2)
-        loss_sum += loss.data[0]*feature_dim
+        loss_sum += loss.data*feature_dim
     return loss_sum/(batch_idx+1)
 
 
