@@ -387,7 +387,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __init__(self, G_list, max_num_node=None, max_prev_node=None, iteration=20000):
         self.adj_all = []
         self.len_all = []
-        for G in G_list:
+        for G in G_list: # TODO: add node_type_feature_matrix and edge_type_feature_matrix
             self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
             self.len_all.append(G.number_of_nodes())
         if max_num_node is None:
@@ -410,26 +410,33 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.adj_all)
     def __getitem__(self, idx):
-        adj_copy = self.adj_all[idx].copy()
+        adj_copy = self.adj_all[idx].copy() # Dim: 200 * 200(actual node numbers of this graph: N)
         x_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
+        # x_patch Dim: 360 * 40
         x_batch[0,:] = 1 # the first input token is all ones
         y_batch = np.zeros((self.n, self.max_prev_node))  # here zeros are padded for small graph
+        # y_patch Dim: 360 * 40
         # generate input x, y pairs
-        len_batch = adj_copy.shape[0]
+        len_batch = adj_copy.shape[0] # N
         x_idx = np.random.permutation(adj_copy.shape[0])
-        adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
+        adj_copy = adj_copy[np.ix_(x_idx, x_idx)] # re-ordering use x_idx
         adj_copy_matrix = np.asmatrix(adj_copy)
-        G = nx.from_numpy_matrix(adj_copy_matrix)
+        G = nx.from_numpy_matrix(adj_copy_matrix) # re-generate the graph; currently no node features or edge features
         # then do bfs in the permuted G
-        start_idx = np.random.randint(adj_copy.shape[0])
-        x_idx = np.array(bfs_seq(G, start_idx))
-        adj_copy = adj_copy[np.ix_(x_idx, x_idx)]
-        adj_encoded = encode_adj(adj_copy.copy(), max_prev_node=self.max_prev_node)
+        start_idx = np.random.randint(adj_copy.shape[0]) # randomly select a start node
+        x_idx = np.array(bfs_seq(G, start_idx)) # new ordering index vector
+        adj_copy = adj_copy[np.ix_(x_idx, x_idx)] # re-ordering use x_idx # Dim of adj_copy: N * N
+        adj_encoded = encode_adj(adj_copy.copy(), max_prev_node=self.max_prev_node) # Dim: N * 40 (40: max_prev_node, denote as M)
+        # TODO: add re-ordering of node_type_feature_matrix and edge_type_feature_matrix
+        # node_f = node_f[x_idx, :]
+        # edge_f = edge_f[x_idx, :]
+
         # get x and y and adj
         # for small graph the rest are zero padded
         y_batch[0:adj_encoded.shape[0], :] = adj_encoded
-        x_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded
+        x_batch[1:adj_encoded.shape[0] + 1, :] = adj_encoded # has an all-1 row at the beginning of it
         return {'x':x_batch,'y':y_batch, 'len':len_batch}
+        # TODO: determine return data type: x_node_f, y_node_f, x_edge_f, y_edge_f?
 
     def calc_max_prev_node(self, iter=20000,topk=10):
         max_prev_node = []

@@ -443,23 +443,24 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         node_f_gen.train()
         #edge_f_gen.train()
     loss_sum = 0
-    for batch_idx, data in enumerate(data_loader):
+    for batch_idx, data in enumerate(data_loader): # Fetch graphs of one batch_size; e.g. 32 graphs
         rnn.zero_grad()
         output.zero_grad()
         if flag_gen:
             node_f_gen.zero_grad()
             #edge_f_gen.zero_grad()
-        x_unsorted = data['x'].float()
+        x_unsorted = data['x'].float() # Dim: BS * N_max * M (N_max: max node numbers in all graphs)
+        # TODO: add feature matrix, e.g. data['x_node_f']rf vthhh
         y_unsorted = data['y'].float()
-        y_len_unsorted = data['len']
-        y_len_max = max(y_len_unsorted)
+        y_len_unsorted = data['len'] # list of node numbers in each graph in this batch
+        y_len_max = max(y_len_unsorted) # denote as N
         x_unsorted = x_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
         y_unsorted = y_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
         # initialize GRU hidden state according to batch size
         rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
         # output.hidden = output.init_hidden(batch_size=x_unsorted.size(0)*x_unsorted.size(1))
 
-        # sort input
+        # sort input # The graph with most node numbers come first
         y_len,sort_index = torch.sort(y_len_unsorted,0,descending=True)
         y_len = y_len.numpy().tolist()
         x = torch.index_select(x_unsorted,0,sort_index) # Dim: BS * N * M
@@ -468,6 +469,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         # input, output for output rnn module
         # a smart use of pytorch builtin function: pack variable--b1_l1,b2_l1,...,b1_l2,b2_l2,...
         y_reshape = pack_padded_sequence(y,y_len,batch_first=True).data # Dim: SumN * M
+        # TODO: input should be edge_f, output should be dim: SumN * M * EF
+
         # reverse y_reshape, so that their lengths are sorted, add dimension
         idx = [i for i in range(y_reshape.size(0)-1, -1, -1)]
         idx = torch.LongTensor(idx)
@@ -475,6 +478,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         y_reshape = y_reshape.view(y_reshape.size(0),y_reshape.size(1),1) # Dim: SumN * M * 1
 
         output_x = torch.cat((torch.ones(y_reshape.size(0),1,1),y_reshape[:,0:-1,0:1]),dim=1) # TODO: Why is there an all-1 row?
+        # TODO: output_x should be dim: SumN * M * EF
         output_y = y_reshape # Dim: SumN * M * 1
         # batch size for output module: sum(y_len)
         output_y_len = []
@@ -482,6 +486,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         for i in range(len(output_y_len_bin)-1,0,-1):
             count_temp = np.sum(output_y_len_bin[i:]) # count how many y_len is above i
             output_y_len.extend([min(i,y.size(2))]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
+            # TODO: understand what's going on
 
         # pack into variable
         x = Variable(x).cuda() # Dim should be BS * N * (M + NF + EF)
@@ -505,7 +510,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # Dim should be SumN * hidden_size_rnn_output
 
-        # reverse h
+        # reverse h # TODO: why reverse?
         idx = [i for i in range(h.size(0) - 1, -1, -1)]
         idx = Variable(torch.LongTensor(idx)).cuda()
         h = h.index_select(0, idx)
