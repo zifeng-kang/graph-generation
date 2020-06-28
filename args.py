@@ -47,6 +47,7 @@ class Args():
         self.max_node_feature_num = 1 # max node feature number of desired output
         self.max_edge_feature_num = 0 # max edge feature number of desired output
         self.edge_feature_output_dim = None
+        self.node_feature_input_dim = None
 
         ### network config
         ## GraphRNN

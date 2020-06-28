@@ -123,7 +123,7 @@ if __name__ == '__main__':
                         has_output=False).cuda()
         output = MLP_plain(h_size=args.hidden_size_rnn, embedding_size=args.embedding_size_output, y_size=args.max_prev_node).cuda()
     elif 'GraphRNN_RNN' in args.note:
-        rnn = GRU_plain(input_size=args.max_prev_node, embedding_size=args.embedding_size_rnn,
+        rnn = GRU_plain(input_size=args.node_feature_input_dim, embedding_size=args.embedding_size_rnn,
                         hidden_size=args.hidden_size_rnn, num_layers=args.num_layers, has_input=True,
                         has_output=True, output_size=args.hidden_size_rnn_output).cuda()
         node_f_gen = MLP_plain(h_size=args.hidden_size_rnn_output, embedding_size=args.embedding_size_output, y_size=args.max_node_feature_num).cuda()

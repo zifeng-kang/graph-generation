@@ -151,7 +151,11 @@ def create(args):
         args.max_prev_node = 15
 
     # update edge_feature_output_dim
-    args.edge_feature_output_dim = args.max_edge_feature_num + 1 #int(args.max_prev_node * args.max_edge_feature_num)
+    if not args.edge_feature_output_dim:
+        args.edge_feature_output_dim = args.max_edge_feature_num + 1 #int(args.max_prev_node * args.max_edge_feature_num)
+    if not args.node_feature_input_dim:
+        # args.node_feature_input_dim = args.max_node_feature_num + args.max_prev_node + args.edge_feature_output_dim
+        args.node_feature_input_dim = args.max_prev_node
 
     return graphs
 

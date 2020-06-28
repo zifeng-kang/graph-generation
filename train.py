@@ -435,26 +435,26 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
                     scheduler_rnn, scheduler_output,
                     node_f_gen=None, edge_f_gen=None):
     flag_gen = False
-    if node_f_gen and edge_f_gen:
+    if node_f_gen : #and edge_f_gen:
         flag_gen = True
     rnn.train()
     output.train()
     if flag_gen:
         node_f_gen.train()
-        edge_f_gen.train()
+        #edge_f_gen.train()
     loss_sum = 0
     for batch_idx, data in enumerate(data_loader):
         rnn.zero_grad()
         output.zero_grad()
         if flag_gen:
             node_f_gen.zero_grad()
-            edge_f_gen.zero_grad()
+            #edge_f_gen.zero_grad()
         x_unsorted = data['x'].float()
         y_unsorted = data['y'].float()
         y_len_unsorted = data['len']
         y_len_max = max(y_len_unsorted)
-        x_unsorted = x_unsorted[:, 0:y_len_max, :]
-        y_unsorted = y_unsorted[:, 0:y_len_max, :]
+        x_unsorted = x_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
+        y_unsorted = y_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
         # initialize GRU hidden state according to batch size
         rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
         # output.hidden = output.init_hidden(batch_size=x_unsorted.size(0)*x_unsorted.size(1))
@@ -462,20 +462,20 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         # sort input
         y_len,sort_index = torch.sort(y_len_unsorted,0,descending=True)
         y_len = y_len.numpy().tolist()
-        x = torch.index_select(x_unsorted,0,sort_index)
-        y = torch.index_select(y_unsorted,0,sort_index)
+        x = torch.index_select(x_unsorted,0,sort_index) # Dim: BS * N * M
+        y = torch.index_select(y_unsorted,0,sort_index) # Dim: BS * N * M
 
         # input, output for output rnn module
         # a smart use of pytorch builtin function: pack variable--b1_l1,b2_l1,...,b1_l2,b2_l2,...
-        y_reshape = pack_padded_sequence(y,y_len,batch_first=True).data
+        y_reshape = pack_padded_sequence(y,y_len,batch_first=True).data # Dim: SumN * M
         # reverse y_reshape, so that their lengths are sorted, add dimension
         idx = [i for i in range(y_reshape.size(0)-1, -1, -1)]
         idx = torch.LongTensor(idx)
         y_reshape = y_reshape.index_select(0, idx)
-        y_reshape = y_reshape.view(y_reshape.size(0),y_reshape.size(1),1)
+        y_reshape = y_reshape.view(y_reshape.size(0),y_reshape.size(1),1) # Dim: SumN * M * 1
 
-        output_x = torch.cat((torch.ones(y_reshape.size(0),1,1),y_reshape[:,0:-1,0:1]),dim=1)
-        output_y = y_reshape
+        output_x = torch.cat((torch.ones(y_reshape.size(0),1,1),y_reshape[:,0:-1,0:1]),dim=1) # TODO: Why is there an all-1 row?
+        output_y = y_reshape # Dim: SumN * M * 1
         # batch size for output module: sum(y_len)
         output_y_len = []
         output_y_len_bin = np.bincount(np.array(y_len))
@@ -484,25 +484,26 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             output_y_len.extend([min(i,y.size(2))]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
 
         # pack into variable
-        x = Variable(x).cuda()
+        x = Variable(x).cuda() # Dim should be BS * N * (M + NF + EF)
         y = Variable(y).cuda()
-        output_x = Variable(output_x).cuda()
-        output_y = Variable(output_y).cuda()
+        output_x = Variable(output_x).cuda() # Dim should be SumN * M * EF
+        output_y = Variable(output_y).cuda() # Dim should be SumN * M * EF
         # print(output_y_len)
         # print('len',len(output_y_len))
         # print('y',y.size())
         # print('output_y',output_y.size())
 
-        output_node_f = Variable(torch.zeros(x.size(0), x.size(1), args.max_node_feature_num)).cuda()
+        output_node_f = Variable(torch.zeros(x.size(0), x.size(1), args.max_node_feature_num)).cuda() # Dim should be BS * N * NF
         # output_edge_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.edge_feature_output_dim)).cuda()
 
 
         # if using ground truth to train
-        h = rnn(x, pack=True, input_len=y_len)
+        h = rnn(x, pack=True, input_len=y_len) # Dim should be BS * N * hidden_size_rnn_output
         node_f_pred = node_f_gen(h)  # TODO: check if dim correct
-        node_f_pred = torch.sigmoid(node_f_pred)
+        node_f_pred = torch.sigmoid(node_f_pred) # Dim should be BS * N * NF
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
+        # Dim should be SumN * hidden_size_rnn_output
 
         # reverse h
         idx = [i for i in range(h.size(0) - 1, -1, -1)]
@@ -513,8 +514,9 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         y_pred = output(output_x, pack=True, input_len=output_y_len)
         # edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
         # edge_f_pred = torch.sigmoid(edge_f_pred)
-        y_pred = torch.sigmoid(y_pred)
+        y_pred = torch.sigmoid(y_pred) # Dim should be SumN * M * EF
         # clean
+        # If all elements in output_y_len are equal to M, this code segment has no effect
         y_pred = pack_padded_sequence(y_pred, output_y_len, batch_first=True)
         y_pred = pad_packed_sequence(y_pred, batch_first=True)[0]
         output_y = pack_padded_sequence(output_y,output_y_len,batch_first=True)
@@ -534,7 +536,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
         if epoch % args.epochs_log==0 and batch_idx==0: # only output first batch's statistics
             print('Epoch: {}/{}, train loss: {:.6f}, graph type: {}, num_layer: {}, hidden: {}'.format(
-                epoch, args.epochs,loss.data[0], args.graph_type, args.num_layers, args.hidden_size_rnn))
+                epoch, args.epochs,loss.data, args.graph_type, args.num_layers, args.hidden_size_rnn))
 
         # logging
         log_value('loss_'+args.fname, loss.data, epoch*args.batch_ratio+batch_idx)
