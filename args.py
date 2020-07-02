@@ -23,7 +23,8 @@ class Args():
         # self.graph_type = 'caveman_small'
         # self.graph_type = 'caveman_small_single'
         # self.graph_type = 'community4'
-        self.graph_type = 'grid'
+        # self.graph_type = 'grid'
+        self.graph_type = "AST"
         # self.graph_type = 'grid_small'
         # self.graph_type = 'ladder_small'
 
@@ -44,10 +45,10 @@ class Args():
         self.max_num_node = None # max number of nodes in a graph
         self.max_prev_node = None # max previous node that looks back
 
-        self.max_node_feature_num = 1 # max node feature number of desired output
+        self.max_node_feature_num = None # max node feature number of desired output # note as NF
         self.max_edge_feature_num = 0 # max edge feature number of desired output
-        self.edge_feature_output_dim = None
-        self.node_feature_input_dim = None
+        self.edge_feature_output_dim = None # note as EF
+        self.node_feature_input_dim = None # note as INF
 
         ### network config
         ## GraphRNN
@@ -61,8 +62,8 @@ class Args():
         self.embedding_size_rnn_output = 8 # the embedding size for output rnn
         self.embedding_size_output = int(64/self.parameter_shrink) # the embedding size for output (VAE/MLP)
 
-        self.batch_size = 32 # normal: 32, and the rest should be changed accordingly
-        self.test_batch_size = 32
+        self.batch_size = 2 # normal: 32, and the rest should be changed accordingly
+        self.test_batch_size = 2
         self.test_total_size = 1000
         self.num_layers = 4
 

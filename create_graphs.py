@@ -3,6 +3,7 @@ import numpy as np
 
 from utils import *
 from data import *
+from data_process import Graph_load_batch as ast_graph_load_batch
 
 def create(args):
 ### load datasets
@@ -150,12 +151,22 @@ def create(args):
         graphs = graphs[0:200]
         args.max_prev_node = 15
 
-    # update edge_feature_output_dim
+    elif args.graph_type == 'AST':
+        graphs = ast_graph_load_batch(min_num_nodes=10, name='AST')
+        # update edge_feature_output_dim
+        if not args.max_node_feature_num:
+            # print(type(graphs[1].nodes._nodes), graphs[1].nodes._nodes.keys())
+            args.max_node_feature_num = len(list(graphs[1].nodes._nodes._atlas[1].keys()))  # now equals to 28
+        args.max_prev_node = 150
+    # TODO: args.max_edge_feature_num update
+
+
     if not args.edge_feature_output_dim:
-        args.edge_feature_output_dim = args.max_edge_feature_num + 1 #int(args.max_prev_node * args.max_edge_feature_num)
+        args.edge_feature_output_dim = args.max_edge_feature_num + 2 #int(args.max_prev_node * args.max_edge_feature_num)
+        # 2 indicates two directions of edges
     if not args.node_feature_input_dim:
-        # args.node_feature_input_dim = args.max_node_feature_num + args.max_prev_node + args.edge_feature_output_dim
-        args.node_feature_input_dim = args.max_prev_node
+        args.node_feature_input_dim = args.max_node_feature_num + args.max_prev_node + args.edge_feature_output_dim
+        # args.node_feature_input_dim = args.max_prev_node
 
     return graphs
 

@@ -450,7 +450,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
             node_f_gen.zero_grad()
             #edge_f_gen.zero_grad()
         x_unsorted = data['x'].float() # Dim: BS * N_max * M (N_max: max node numbers in all graphs)
-        # TODO: add feature matrix, e.g. data['x_node_f']rf vthhh
+        # TODO: add feature matrix, e.g. data['x_node_f']
+        # node_f dim: BS * N_max *
         y_unsorted = data['y'].float()
         y_len_unsorted = data['len'] # list of node numbers in each graph in this batch
         y_len_max = max(y_len_unsorted) # denote as N

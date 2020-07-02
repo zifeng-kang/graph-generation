@@ -7,10 +7,10 @@
 *.dat
 *.pkl
 *.pickle
-
+*.DS_Store
 figures/
 figures_paper/
-
+dataset/AST/
 figures_prediction/
 
 **/bin/
