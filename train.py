@@ -449,64 +449,87 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         if flag_gen:
             node_f_gen.zero_grad()
             #edge_f_gen.zero_grad()
-        x_unsorted = data['x'].float() # Dim: BS * N_max * M (N_max: max node numbers in all graphs)
-        # TODO: add feature matrix, e.g. data['x_node_f']
-        # node_f dim: BS * N_max *
-        y_unsorted = data['y'].float()
+        # x_unsorted = data['x'].float() # Dim: BS * N_max * M (N_max: max node numbers in all graphs)
+        # y_unsorted = data['y'].float()
+        # add feature matrix, e.g. data['x_node_f']
+        # 'input_node_f':x_batch,'raw_node_f':raw_node_f_batch, 'edge_f':edge_f_padded_batch, 'len':len_batch
+        input_node_f_unsorted = data['input_node_f'].float() # Dim: BS * N_max * INF
+        raw_node_f_unsorted = data['raw_node_f'].float() # Dim: BS * N_max * NF
+        edge_f_unsorted = data['edge_f'].float() # Dim: BS * N_max * M * EF
         y_len_unsorted = data['len'] # list of node numbers in each graph in this batch
         y_len_max = max(y_len_unsorted) # denote as N
-        x_unsorted = x_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
-        y_unsorted = y_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
+        # x_unsorted = x_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
+        # y_unsorted = y_unsorted[:, 0:y_len_max, :]# Dim: BS * N * M
+        input_node_f_unsorted = input_node_f_unsorted[:, 0:y_len_max, :] # Dim: BS * (N+1) * INF
+        raw_node_f_unsorted = raw_node_f_unsorted[:, 0:y_len_max, :] # Dim: BS * N * NF
+        edge_f_unsorted = edge_f_unsorted[:, 0:y_len_max, :, :] # Dim: BS * N * M * EF
+        BS, N, M, EF = edge_f_unsorted.shape
         # initialize GRU hidden state according to batch size
-        rnn.hidden = rnn.init_hidden(batch_size=x_unsorted.size(0))
+        rnn.hidden = rnn.init_hidden(batch_size=input_node_f_unsorted.size(0))
         # output.hidden = output.init_hidden(batch_size=x_unsorted.size(0)*x_unsorted.size(1))
 
         # sort input # The graph with most node numbers come first
         y_len,sort_index = torch.sort(y_len_unsorted,0,descending=True)
         y_len = y_len.numpy().tolist()
-        x = torch.index_select(x_unsorted,0,sort_index) # Dim: BS * N * M
-        y = torch.index_select(y_unsorted,0,sort_index) # Dim: BS * N * M
+        # x = torch.index_select(x_unsorted,0,sort_index) # Dim: BS * N * M
+        # y = torch.index_select(y_unsorted,0,sort_index) # Dim: BS * N * M
+        input_node_f = torch.index_select(input_node_f_unsorted, 0, sort_index)
+        raw_node_f = torch.index_select(raw_node_f_unsorted, 0, sort_index)
+        edge_f = torch.index_select(edge_f_unsorted, 0, sort_index)
+
 
         # input, output for output rnn module
         # a smart use of pytorch builtin function: pack variable--b1_l1,b2_l1,...,b1_l2,b2_l2,...
-        y_reshape = pack_padded_sequence(y,y_len,batch_first=True).data # Dim: SumN * M
-        # TODO: input should be edge_f, output should be dim: SumN * M * EF
+        # y_reshape = pack_padded_sequence(y,y_len,batch_first=True).data # Dim: SumN * M
+        # input should be edge_f, output should be dim: SumN * M * EF
+        edge_f_reshape = pack_padded_sequence(edge_f,y_len,batch_first=True).data # SumN * M * EF
 
-        # reverse y_reshape, so that their lengths are sorted, add dimension
-        idx = [i for i in range(y_reshape.size(0)-1, -1, -1)]
+        # # reverse y_reshape, so that their lengths are sorted, add dimension
+        # idx = [i for i in range(y_reshape.size(0)-1, -1, -1)]
+        # idx = torch.LongTensor(idx)
+        # y_reshape = y_reshape.index_select(0, idx)
+        # y_reshape = y_reshape.view(y_reshape.size(0),y_reshape.size(1),1) # Dim: SumN * M * 1
+        #
+        # output_x = torch.cat((torch.ones(y_reshape.size(0),1,1),y_reshape[:,0:-1,0:1]),dim=1) # should have all-1 row
+        # reverse edge_f_reshape, so that their lengths are sorted, add dimension
+        idx = [i for i in range(edge_f_reshape.size(0) - 1, -1, -1)]
         idx = torch.LongTensor(idx)
-        y_reshape = y_reshape.index_select(0, idx)
-        y_reshape = y_reshape.view(y_reshape.size(0),y_reshape.size(1),1) # Dim: SumN * M * 1
+        edge_f_reshape = edge_f_reshape.index_select(0, idx)
+        # edge_f_reshape = edge_f_reshape.view(edge_f_reshape.size(0), edge_f_reshape.size(1), edge_f_reshape.size(2))  # Dim: SumN * M * EF
 
-        output_x = torch.cat((torch.ones(y_reshape.size(0),1,1),y_reshape[:,0:-1,0:1]),dim=1) # TODO: Why is there an all-1 row?
-        # TODO: output_x should be dim: SumN * M * EF
-        output_y = y_reshape # Dim: SumN * M * 1
+        edge_rnn_input = torch.cat((torch.ones(edge_f_reshape.size(0), 1, edge_f_reshape.size(2)), edge_f_reshape[:, 0:-1, :]),
+                             dim=1)  # should have all-1 row
+        # Dim: SumN * (M+1) * EF
+
+        # output_y = y_reshape # Dim: SumN * M * 1
+        output_y = edge_f_reshape
         # batch size for output module: sum(y_len)
         output_y_len = []
         output_y_len_bin = np.bincount(np.array(y_len))
         for i in range(len(output_y_len_bin)-1,0,-1):
             count_temp = np.sum(output_y_len_bin[i:]) # count how many y_len is above i
-            output_y_len.extend([min(i,y.size(2))]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
+            output_y_len.extend([min(i,M)]*count_temp) # put them in output_y_len; max value should not exceed y.size(2)
             # TODO: understand what's going on
 
         # pack into variable
-        x = Variable(x).cuda() # Dim should be BS * N * (M + NF + EF)
-        y = Variable(y).cuda()
-        output_x = Variable(output_x).cuda() # Dim should be SumN * M * EF
+        # x = Variable(x).cuda() # Dim should be BS * N * (M + NF + EF)
+        # y = Variable(y).cuda()
+        # output_x = Variable(output_x).cuda() # Dim should be SumN * M * EF
         output_y = Variable(output_y).cuda() # Dim should be SumN * M * EF
-        # print(output_y_len)
-        # print('len',len(output_y_len))
-        # print('y',y.size())
-        # print('output_y',output_y.size())
 
-        output_node_f = Variable(torch.zeros(x.size(0), x.size(1), args.max_node_feature_num)).cuda() # Dim should be BS * N * NF
+        edge_rnn_input = Variable(edge_rnn_input).cuda()
+        input_node_f = Variable(input_node_f).cuda()
+
+        # output_node_f = Variable(torch.zeros(x.size(0), x.size(1), args.max_node_feature_num)).cuda() # Dim should be BS * N * NF
+        output_node_f = Variable(raw_node_f).cuda()
         # output_edge_f = Variable(torch.zeros(output_y.size(0), output_y.size(1), args.edge_feature_output_dim)).cuda()
 
 
         # if using ground truth to train
-        h = rnn(x, pack=True, input_len=y_len) # Dim should be BS * N * hidden_size_rnn_output
-        node_f_pred = node_f_gen(h)  # TODO: check if dim correct
-        node_f_pred = torch.sigmoid(node_f_pred) # Dim should be BS * N * NF
+        # h = rnn(x, pack=True, input_len=y_len) # Dim should be BS * N * hidden_size_rnn_output
+        h = rnn(input_node_f, pack=True, input_len=y_len) # Dim: BS * (N+1) * hidden_size_rnn_output
+        node_f_pred = node_f_gen(h)  # Dim: BS * (N+1) * NF
+        node_f_pred = torch.sigmoid(node_f_pred[:, 1:, :]) # Dim: BS * N * NF
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # Dim should be SumN * hidden_size_rnn_output
@@ -516,11 +539,12 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         idx = Variable(torch.LongTensor(idx)).cuda()
         h = h.index_select(0, idx)
         hidden_null = Variable(torch.zeros(args.num_layers-1, h.size(0), h.size(1))).cuda()
-        output.hidden = torch.cat((h.view(1,h.size(0),h.size(1)),hidden_null),dim=0) # num_layers, batch_size, hidden_size
-        y_pred = output(output_x, pack=True, input_len=output_y_len)
+        output.hidden = torch.cat((h.view(1,h.size(0),h.size(1)),hidden_null),dim=0) # num_layers, SumN, hidden_size
+        # y_pred = output(output_x, pack=True, input_len=output_y_len)
+        y_pred = output(edge_rnn_input, pack=True, input_len=output_y_len) # Dim: SumN * (M+1) * EF
         # edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
         # edge_f_pred = torch.sigmoid(edge_f_pred)
-        y_pred = torch.sigmoid(y_pred) # Dim should be SumN * M * EF
+        y_pred = torch.sigmoid(y_pred[:, 1:, :]) # Dim: SumN * M * EF
         # clean
         # If all elements in output_y_len are equal to M, this code segment has no effect
         y_pred = pack_padded_sequence(y_pred, output_y_len, batch_first=True)
@@ -546,7 +570,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
         # logging
         log_value('loss_'+args.fname, loss.data, epoch*args.batch_ratio+batch_idx)
-        feature_dim = y.size(1)*y.size(2)
+        feature_dim = N*M
         loss_sum += loss.data*feature_dim
     return loss_sum/(batch_idx+1)
 
