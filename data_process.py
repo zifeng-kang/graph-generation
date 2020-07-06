@@ -7,7 +7,9 @@ def Graph_load_batch(min_num_nodes = 10, max_num_nodes = 2000, name = 'AST'):
     print('Loading graph dataset: ' + str(name))
 
     G = nx.Graph()
-    path = "dataset/AST/shared/"
+    # path = "dataset/AST/shared/"
+    # if name == "200Graphs":
+    path = "dataset/AST/zips/200Graphs/"
 
     data_adj = np.loadtxt(path + name + '_A.txt', delimiter=',').astype(int)
     data_node_label = np.loadtxt(path + name + '_node_labels.txt', delimiter=',').astype(int)

@@ -181,6 +181,26 @@ def bfs_seq(G, start_id):
     return output
 
 
+def add_from_node_f_matrix(matrix, G:nx.Graph):
+    N, NF = matrix.shape
+    f_dict = list({f'f{feature_idx}':matrix[node,feature_idx] for feature_idx in range(NF)} for node in range(N))
+    node_list = list(zip(range(N), f_dict))
+    G.add_nodes_from(node_list)
+
+
+def add_from_edge_f_matrix(matrix, G:nx.Graph):
+    N, M, EF = matrix.shape
+    for i in range(N):
+        for j in range(M):
+            indicator = matrix[i,j,-2:]
+            if indicator[0] + indicator[1] > 0: # an edge exists
+                edge_f_vector = matrix[i,j,:]
+                f_dict = {f'f{feature_idx}':edge_f_vector[feature_idx] for feature_idx in range(EF)}
+                if i >=M:
+                    G.add_edges_from([(i, j+i-M+1, f_dict)])
+                else:
+                    G.add_edges_from([(i, j, f_dict)])
+
 
 def encode_adj(adj, max_prev_node=10, is_full = False, is_3D=False):
     '''
@@ -406,7 +426,7 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
             # add node_type_feature_matrix and edge_type_feature_matrix
             self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
             self.node_num_all.append(np.asarray(list(G.nodes)))
-            print(len(G.nodes._nodes), len(G.edges._adjdict), len(list(G.adjacency())))
+            # print(len(G.nodes._nodes), len(G.edges._adjdict), len(list(G.adjacency())))
             self.raw_node_f_all.append(G.nodes._nodes._atlas)
             # self.input_node_f_all.append(self.construct_input_node_f(G))
             self.edge_f_all.append(G.edges._adjdict._atlas)

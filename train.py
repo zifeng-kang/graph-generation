@@ -528,8 +528,11 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         # if using ground truth to train
         # h = rnn(x, pack=True, input_len=y_len) # Dim should be BS * N * hidden_size_rnn_output
         h = rnn(input_node_f, pack=True, input_len=y_len) # Dim: BS * (N+1) * hidden_size_rnn_output
+
         node_f_pred = node_f_gen(h)  # Dim: BS * (N+1) * NF
-        node_f_pred = torch.sigmoid(node_f_pred[:, 1:, :]) # Dim: BS * N * NF
+        # TODO node_f_pred = Mask & node_f_pred
+        # Matrix, (NF, NF) 1,1,1,0,0,0...
+        node_f_pred = torch.softmax(node_f_pred, dim=2) # Dim: BS * N * NF
 
         h = pack_padded_sequence(h,y_len,batch_first=True).data # get packed hidden vector
         # Dim should be SumN * hidden_size_rnn_output
@@ -544,7 +547,7 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         y_pred = output(edge_rnn_input, pack=True, input_len=output_y_len) # Dim: SumN * (M+1) * EF
         # edge_f_pred = edge_f_gen(y_pred)  # TODO: check if dim correct
         # edge_f_pred = torch.sigmoid(edge_f_pred)
-        y_pred = torch.sigmoid(y_pred[:, 1:, :]) # Dim: SumN * M * EF
+        y_pred = torch.softmax(y_pred, dim=2) # Dim: SumN * M * EF
         # clean
         # If all elements in output_y_len are equal to M, this code segment has no effect
         y_pred = pack_padded_sequence(y_pred, output_y_len, batch_first=True)
@@ -576,37 +579,70 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
 
-def test_rnn_epoch(epoch, args, rnn, output, test_batch_size=16):
+def test_rnn_epoch(epoch, args, rnn, output, node_f_gen=None, edge_f_gen=None, test_batch_size=16):
+    flag_node_f_gen = False
+    if node_f_gen:
+        flag_node_f_gen = True
     rnn.hidden = rnn.init_hidden(test_batch_size)
     rnn.eval()
     output.eval()
+    if flag_node_f_gen:
+        node_f_gen.eval()
 
     # generate graphs
     max_num_node = int(args.max_num_node)
-    y_pred_long = Variable(torch.zeros(test_batch_size, max_num_node, args.max_prev_node)).cuda() # discrete prediction
-    x_step = Variable(torch.ones(test_batch_size,1,args.max_prev_node)).cuda()
+    # y_pred_long = Variable(torch.zeros(test_batch_size, max_num_node, args.max_prev_node)).cuda() # discrete prediction
+    # (32, 361, 40). Should be: node_f_pred_long: (BS, Nmax, NF), edge_f_pred_long: (BS, )
+    node_f_pred_long = Variable(torch.zeros(test_batch_size, max_num_node, args.max_node_feature_num)).cuda()
+    edge_f_pred_long = Variable(torch.zeros(test_batch_size, max_num_node, args.max_prev_node, args.edge_feature_output_dim)).cuda()
+    x_step = Variable(torch.ones(test_batch_size,1,args.node_feature_input_dim)).cuda()
+    # Rnn should start with all-one input
+    # (32, 1, 40)
     for i in range(max_num_node):
-        h = rnn(x_step)
-        # output.hidden = h.permute(1,0,2)
+        h = rnn(x_step) # Dim: (BS, 1, Hidden)
+        node_f_pred_step = node_f_gen(h)
+        node_f_pred_step = torch.softmax(node_f_pred_step, dim=2) # Dim: (BS, 1, Hidden)
+        node_f_pred_step = sample_sigmoid(node_f_pred_step, sample=True, sample_time=1)
+        # TODO node_f_pred = Mask & node_f_pred
+
         hidden_null = Variable(torch.zeros(args.num_layers - 1, h.size(0), h.size(2))).cuda()
         output.hidden = torch.cat((h.permute(1,0,2), hidden_null),
                                   dim=0)  # num_layers, batch_size, hidden_size
-        x_step = Variable(torch.zeros(test_batch_size,1,args.max_prev_node)).cuda()
-        output_x_step = Variable(torch.ones(test_batch_size,1,1)).cuda()
+        # should renew x_step
+        x_step = Variable(torch.zeros(test_batch_size,1,args.node_feature_input_dim)).cuda()
+        x_step[:, :, :args.max_node_feature_num] = node_f_pred_step
+
+        output_x_step = Variable(torch.ones(test_batch_size,1,args.edge_feature_output_dim)).cuda()
+        # Rnn should start with all-one input
         for j in range(min(args.max_prev_node,i+1)):
-            output_y_pred_step = output(output_x_step)
+            output_y_pred_step = output(output_x_step) # (BS, 1, EF)
             output_x_step = sample_sigmoid(output_y_pred_step, sample=True, sample_time=1)
-            x_step[:,:,j:j+1] = output_x_step
+            # x_step[:,:,j:j+1] = output_x_step
+            edge_f_pred_long[:, i:i + 1, j:j+1, :] = output_x_step.view(output_x_step.size(0), output_x_step.size(1),
+                                                                        1, output_x_step.size(2))
             output.hidden = Variable(output.hidden.data).cuda()
-        y_pred_long[:, i:i + 1, :] = x_step
+        # y_pred_long[:, i:i + 1, :] = x_step
+
+        node_f_pred_long[:, i:i+1, :] = node_f_pred_step
+        node_edge_info = edge_f_pred_long[:, i, :, :] # (BS,  M, EF) # where EF = args.edge_feature_output_dim = args.max_edge_feature_num + 2
+        x_step[:, :, args.max_node_feature_num:args.max_node_feature_num+args.max_prev_node] = \
+            torch.tensor(torch.tensor(node_edge_info[:, :, -2:], dtype=torch.bool).any(2), dtype=torch.uint8).\
+                view(test_batch_size, 1, args.max_prev_node) # (BS, 1, M)
+        x_step[:, :, args.max_node_feature_num+args.max_prev_node:] = \
+            node_edge_info.mean(dim=1, keepdim=True) # (BS, 1, EF)
         rnn.hidden = Variable(rnn.hidden.data).cuda()
-    y_pred_long_data = y_pred_long.data.long()
+    # y_pred_long_data = y_pred_long.data.long()
+    node_f_pred_long_data = node_f_pred_long.data.long()
+    edge_f_pred_long_data = edge_f_pred_long.data.long()
 
     # save graphs as pickle
     G_pred_list = []
     for i in range(test_batch_size):
-        adj_pred = decode_adj(y_pred_long_data[i].cpu().numpy())
-        G_pred = get_graph(adj_pred) # get a graph from zero-padded adj
+        # adj_pred = decode_adj(y_pred_long_data[i].cpu().numpy())
+        # G_pred = get_graph(adj_pred) # get a graph from zero-padded adj
+        G_pred = nx.Graph()
+        add_from_node_f_matrix(node_f_pred_long_data[i].cpu().numpy(), G_pred)
+        add_from_edge_f_matrix(edge_f_pred_long_data[i].cpu().numpy(), G_pred)
         G_pred_list.append(G_pred)
 
     return G_pred_list
@@ -749,7 +785,7 @@ def train(args, dataset_train, rnn, output, node_f_gen=None, edge_f_gen=None):
                     elif 'GraphRNN_MLP' in args.note:
                         G_pred_step = test_mlp_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size,sample_time=sample_time)
                     elif 'GraphRNN_RNN' in args.note:
-                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, test_batch_size=args.test_batch_size)
+                        G_pred_step = test_rnn_epoch(epoch, args, rnn, output, node_f_gen, test_batch_size=args.test_batch_size)
                     G_pred.extend(G_pred_step)
                 # save graphs
                 fname = args.graph_save_path + args.fname_pred + str(epoch) +'_'+str(sample_time) + '.dat'
