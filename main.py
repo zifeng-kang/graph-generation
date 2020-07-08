@@ -32,10 +32,11 @@ if __name__ == '__main__':
     # split datasets
     random.seed(123)
     shuffle(graphs)
-    graphs_len = len(graphs)
-    graphs_test = graphs[int(0.8 * graphs_len):]
-    graphs_train = graphs[0:int(0.8*graphs_len)]
-    graphs_validate = graphs[0:max(1,int(0.2*graphs_len))]
+    graphs_train = graphs
+    # graphs_len = len(graphs)
+    # graphs_test = graphs[int(0.8 * graphs_len):]
+    # graphs_train = graphs[0:int(0.8*graphs_len)]
+    # graphs_validate = graphs[0:max(1,int(0.2*graphs_len))]
 
     # if use pre-saved graphs
     # dir_input = "/dfs/scratch0/jiaxuany0/graphs/"
@@ -47,17 +48,17 @@ if __name__ == '__main__':
     # graphs_validate = graphs[int(0.2 * graphs_len):int(0.4 * graphs_len)]
 
 
-    graph_validate_len = 0
-    for graph in graphs_validate:
-        graph_validate_len += graph.number_of_nodes()
-    graph_validate_len /= len(graphs_validate)
-    print('graph_validate_len', graph_validate_len)
-
-    graph_test_len = 0
-    for graph in graphs_test:
-        graph_test_len += graph.number_of_nodes()
-    graph_test_len /= len(graphs_test)
-    print('graph_test_len', graph_test_len)
+    # graph_validate_len = 0
+    # for graph in graphs_validate:
+    #     graph_validate_len += graph.number_of_nodes()
+    # graph_validate_len /= len(graphs_validate)
+    # print('graph_validate_len', graph_validate_len)
+    #
+    # graph_test_len = 0
+    # for graph in graphs_test:
+    #     graph_test_len += graph.number_of_nodes()
+    # graph_test_len /= len(graphs_test)
+    # print('graph_test_len', graph_test_len)
 
 
 

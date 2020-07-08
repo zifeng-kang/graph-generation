@@ -120,7 +120,7 @@ def gumbel_sigmoid(logits, temperature):
 # print(x)
 # print(y)
 
-def sample_sigmoid(y, sample, thresh=0.5, sample_time=2):
+def sample_sigmoid(y, sample, thresh=0.5, sample_time=2, if_sigmoid=False):
     '''
         do sampling over unnormalized score
     :param y: input
@@ -131,7 +131,8 @@ def sample_sigmoid(y, sample, thresh=0.5, sample_time=2):
     '''
 
     # do sigmoid first
-    y = torch.sigmoid(y)
+    if if_sigmoid:
+        y = torch.sigmoid(y)
     # do sampling
     if sample:
         if sample_time>1:

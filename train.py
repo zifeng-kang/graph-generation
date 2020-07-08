@@ -556,9 +556,10 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
         output_y = pad_packed_sequence(output_y,batch_first=True)[0]
         # use cross entropy loss
         loss = 0
-        loss = binary_cross_entropy_weight(y_pred, output_y) + \
-               binary_cross_entropy_weight(node_f_pred, output_node_f) #+ \
+        edge_f_loss = binary_cross_entropy_weight(y_pred, output_y)
+        node_f_loss = binary_cross_entropy_weight(node_f_pred, output_node_f) #+ \
                # binary_cross_entropy_weight(edge_f_pred, output_edge_f)
+        loss = args.edge_loss_w * edge_f_loss + args.node_loss_w * node_f_loss
         loss.backward()
         # update deterministic and lstm
         optimizer_output.step()
@@ -568,8 +569,8 @@ def train_rnn_epoch(epoch, args, rnn, output, data_loader,
 
 
         if epoch % args.epochs_log==0 and batch_idx==0: # only output first batch's statistics
-            print('Epoch: {}/{}, train loss: {:.6f}, graph type: {}, num_layer: {}, hidden: {}'.format(
-                epoch, args.epochs,loss.data, args.graph_type, args.num_layers, args.hidden_size_rnn))
+            print('Epoch: {}/{}, train loss: {:.6f}, node_f_loss: {:.6f}, edge_f_loss: {:.6f}, num_layer: {}, hidden: {}'.format(
+                epoch, args.epochs,loss.data, node_f_loss.data, edge_f_loss.data, args.num_layers, args.hidden_size_rnn))
 
         # logging
         log_value('loss_'+args.fname, loss.data, epoch*args.batch_ratio+batch_idx)
@@ -602,7 +603,7 @@ def test_rnn_epoch(epoch, args, rnn, output, node_f_gen=None, edge_f_gen=None, t
         h = rnn(x_step) # Dim: (BS, 1, Hidden)
         node_f_pred_step = node_f_gen(h)
         node_f_pred_step = torch.softmax(node_f_pred_step, dim=2) # Dim: (BS, 1, Hidden)
-        node_f_pred_step = sample_sigmoid(node_f_pred_step, sample=True, sample_time=1)
+        node_f_pred_step = sample_sigmoid(node_f_pred_step, sample=False, thresh=args.test_thres, sample_time=1)
         # TODO node_f_pred = Mask & node_f_pred
 
         hidden_null = Variable(torch.zeros(args.num_layers - 1, h.size(0), h.size(2))).cuda()
@@ -616,7 +617,8 @@ def test_rnn_epoch(epoch, args, rnn, output, node_f_gen=None, edge_f_gen=None, t
         # Rnn should start with all-one input
         for j in range(min(args.max_prev_node,i+1)):
             output_y_pred_step = output(output_x_step) # (BS, 1, EF)
-            output_x_step = sample_sigmoid(output_y_pred_step, sample=True, sample_time=1)
+            output_y_pred_step = torch.softmax(output_y_pred_step, dim=2)
+            output_x_step = sample_sigmoid(output_y_pred_step, sample=False, thresh=args.test_thres, sample_time=1)
             # x_step[:,:,j:j+1] = output_x_step
             edge_f_pred_long[:, i:i + 1, j:j+1, :] = output_x_step.view(output_x_step.size(0), output_x_step.size(1),
                                                                         1, output_x_step.size(2))
@@ -632,8 +634,8 @@ def test_rnn_epoch(epoch, args, rnn, output, node_f_gen=None, edge_f_gen=None, t
             node_edge_info.mean(dim=1, keepdim=True) # (BS, 1, EF)
         rnn.hidden = Variable(rnn.hidden.data).cuda()
     # y_pred_long_data = y_pred_long.data.long()
-    node_f_pred_long_data = node_f_pred_long.data.long()
-    edge_f_pred_long_data = edge_f_pred_long.data.long()
+    node_f_pred_long_data = node_f_pred_long.data.int()
+    edge_f_pred_long_data = edge_f_pred_long.data.int()
 
     # save graphs as pickle
     G_pred_list = []
@@ -641,8 +643,8 @@ def test_rnn_epoch(epoch, args, rnn, output, node_f_gen=None, edge_f_gen=None, t
         # adj_pred = decode_adj(y_pred_long_data[i].cpu().numpy())
         # G_pred = get_graph(adj_pred) # get a graph from zero-padded adj
         G_pred = nx.Graph()
-        add_from_node_f_matrix(node_f_pred_long_data[i].cpu().numpy(), G_pred)
-        add_from_edge_f_matrix(edge_f_pred_long_data[i].cpu().numpy(), G_pred)
+        node_idx_list = add_from_node_f_matrix(node_f_pred_long_data[i].cpu().numpy(), G_pred)
+        add_from_edge_f_matrix(edge_f_pred_long_data[i].cpu().numpy(), G_pred, node_idx_list)
         G_pred_list.append(G_pred)
 
     return G_pred_list

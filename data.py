@@ -183,23 +183,31 @@ def bfs_seq(G, start_id):
 
 def add_from_node_f_matrix(matrix, G:nx.Graph):
     N, NF = matrix.shape
-    f_dict = list({f'f{feature_idx}':matrix[node,feature_idx] for feature_idx in range(NF)} for node in range(N))
-    node_list = list(zip(range(N), f_dict))
+    node_idx, f_dict = [], []
+    for node in range(N):
+        if matrix[node, :].any():
+            node_idx.append(node)
+            f_dict.append({f'f{feature_idx}':matrix[node,feature_idx] for feature_idx in range(NF)})
+    # f_dict = list({f'f{feature_idx}':matrix[node,feature_idx] for feature_idx in range(NF)} for node in range(N))
+    node_list = list(zip(node_idx, f_dict))
     G.add_nodes_from(node_list)
+    return node_idx
 
 
-def add_from_edge_f_matrix(matrix, G:nx.Graph):
+def add_from_edge_f_matrix(matrix, G:nx.Graph, node_idx):
     N, M, EF = matrix.shape
     for i in range(N):
-        for j in range(M):
+        for j in range(min(M,N)):
             indicator = matrix[i,j,-2:]
             if indicator[0] + indicator[1] > 0: # an edge exists
                 edge_f_vector = matrix[i,j,:]
                 f_dict = {f'f{feature_idx}':edge_f_vector[feature_idx] for feature_idx in range(EF)}
                 if i >=M:
-                    G.add_edges_from([(i, j+i-M+1, f_dict)])
+                    if (i in node_idx) and ((j+i-M+1) in node_idx):
+                        G.add_edges_from([(i, j+i-M+1, f_dict)])
                 else:
-                    G.add_edges_from([(i, j, f_dict)])
+                    if (i in node_idx) and (j in node_idx):
+                        G.add_edges_from([(i, j, f_dict)])
 
 
 def encode_adj(adj, max_prev_node=10, is_full = False, is_3D=False):
@@ -422,14 +430,19 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
     def __init__(self, G_list, max_num_node=None, max_prev_node=None, iteration=20000):
         self.adj_all, self.node_num_all, self.edge_f_all, self.raw_node_f_all, self.len_all = \
             [], [], [], [], []
-        for G in G_list:
+        for i,G in enumerate(G_list):
             # add node_type_feature_matrix and edge_type_feature_matrix
             self.adj_all.append(np.asarray(nx.to_numpy_matrix(G)))
-            self.node_num_all.append(np.asarray(list(G.nodes)))
+            node_idx_global = np.asarray(list(G.nodes))
+            self.node_num_all.append(node_idx_global)
             # print(len(G.nodes._nodes), len(G.edges._adjdict), len(list(G.adjacency())))
-            self.raw_node_f_all.append(G.nodes._nodes._atlas)
+            self.raw_node_f_all.append(dict(G.nodes._nodes))
             # self.input_node_f_all.append(self.construct_input_node_f(G))
-            self.edge_f_all.append(G.edges._adjdict._atlas)
+            edge_f_dict = {}
+            for k,v in G.edges._adjdict._atlas.items():
+                if k in node_idx_global:
+                    edge_f_dict[k] = v
+            self.edge_f_all.append(edge_f_dict)
             self.len_all.append(G.number_of_nodes())
         if max_num_node is None:
             self.n = max(self.len_all)
@@ -502,33 +515,36 @@ class Graph_sequence_sampler_pytorch(torch.utils.data.Dataset):
         edge_f_padded_batch[:smallN, :M, :] = edge_f_encoded
         return {'input_node_f':x_batch,'raw_node_f':raw_node_f_batch, 'edge_f':edge_f_padded_batch, 'len':len_batch}
 
-    def construct_raw_node_f(self, node_dict, node_num_list=None):
-        node_attr_list = list(node_dict[1].keys())
+    def construct_raw_node_f(self, node_dict, node_num_list):
+        node_attr_list = list(next(iter(node_dict.values())).keys())
         N, NF = len(node_dict), len(node_attr_list)
+        offset = min(node_num_list)
         raw_node_f = np.zeros(shape=(N, NF)) # pad 0 for small graphs
-        for node, f_dict in node_dict.items(): # 1-indexed
+        for node, f_dict in node_dict.items():
             if node in node_num_list:
-                raw_node_f[node-1] = np.asarray(list(f_dict.values()))
+                raw_node_f[node-offset] = np.asarray(list(f_dict.values())) # 0-indexed
 
-        raw_node_f = raw_node_f[node_num_list-1,:]
+        raw_node_f = raw_node_f[node_num_list-offset,:]
         return raw_node_f
 
     def construct_input_node_f(self, node_dict):
         pass
 
-    def construct_edge_f(self, edge_dict, node_num_list=None, pooling=False):
-        N, EF = len(edge_dict), len(next(iter(edge_dict[1].values())))
+
+    def construct_edge_f(self, edge_dict, node_num_list, pooling=False):
+        node_edge_dict = next(iter(edge_dict.values()))
+        N, EF = len(edge_dict), len(list(next(iter(node_edge_dict.values())).keys()))
+        offset = min(node_num_list)
         edge_f = np.zeros(shape=(N, N, EF)) # pad 0 for small graphs
-        for node_i, i_edge_dict in edge_dict.items(): # still 1-indexed!
+        for node_i, i_edge_dict in edge_dict.items():
             for node_j, edge_f_dict in i_edge_dict.items():
                 if node_i in node_num_list and node_j in node_num_list:
-                    edge_f[node_i-1][node_j-1] = np.asarray(list(edge_f_dict.values()))
+                    edge_f[node_i-offset][node_j-offset] = np.asarray(list(edge_f_dict.values())) # still 0-indexed!
 
-        edge_f = edge_f[np.ix_(node_num_list-1, node_num_list-1)]
+        edge_f = edge_f[np.ix_(node_num_list-offset, node_num_list-offset)] # return dim (N, N, EF)
         if pooling:
-            edge_f = np.sum(edge_f, axis=1) / float(len(node_num_list))
+            edge_f = np.sum(edge_f, axis=1) / float(len(node_num_list)) # return dim (N, EF)
 
-        # return (N, N, EF)
         return edge_f
 
     def calc_max_prev_node(self, iter=20000,topk=10):
